@@ -52,6 +52,8 @@ While the OLM Operator is often configured to watch all namespaces, it can also 
 
 ### ClusterServiceVersion Control Loop
 
+TODO(fail-forward): Add conditional transition from Failed to Replacing when fail forward is enabled.
+
 ```
            +------------------------------------------------------+
            |                                                      |

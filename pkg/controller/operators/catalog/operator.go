@@ -876,6 +876,8 @@ func (o *Operator) syncCatalogSources(obj interface{}) (syncError error) {
 }
 
 func (o *Operator) syncResolvingNamespace(obj interface{}) error {
+	// TODO(fail-forward): Ensure that in the case of a failed InstallPlan/CSV, a new InstallPlan is always resolved and created iff fail forward upgrades are enabled for the namespace.
+
 	ns, ok := obj.(*corev1.Namespace)
 	if !ok {
 		o.logger.Debugf("wrong type: %#v", obj)
@@ -901,10 +903,11 @@ func (o *Operator) syncResolvingNamespace(obj interface{}) error {
 		return err
 	}
 
-	// TODO: parallel
 	maxGeneration := 0
 	subscriptionUpdated := false
 	for i, sub := range subs {
+		// TODO(fail-forward): Mark failed Subscriptions/InstallPlans/CSVs as upgradeable when FailForwardUpdates=true on the OperatorGroup.
+		// Basically, we want to resolve upgrades for them as well.
 		logger := logger.WithFields(logrus.Fields{
 			"sub":     sub.GetName(),
 			"source":  sub.Spec.CatalogSource,

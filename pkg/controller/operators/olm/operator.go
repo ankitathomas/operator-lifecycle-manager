@@ -1933,6 +1933,7 @@ func (a *Operator) transitionCSVState(in v1alpha1.ClusterServiceVersion) (out *v
 
 	case v1alpha1.CSVPhaseSucceeded:
 		// Check if the current CSV is being replaced, return with replacing status if so
+		// TODO(fail-forward): This method v can be used to put a CSV into a state where it will be GC'd
 		if err := a.checkReplacementsAndUpdateStatus(out); err != nil {
 			logger.WithError(err).Info("replacement check")
 			return
@@ -1996,6 +1997,7 @@ func (a *Operator) transitionCSVState(in v1alpha1.ClusterServiceVersion) (out *v
 		}
 
 	case v1alpha1.CSVPhaseFailed:
+		// TODO(fail-forward): Transition to replacing if FailForward is enabled and a CSV exists that replaces the operator.
 		installer, strategy := a.parseStrategiesAndUpdateStatus(out)
 		if strategy == nil {
 			return

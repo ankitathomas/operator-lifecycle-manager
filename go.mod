@@ -240,6 +240,9 @@ replace (
 	github.com/openshift/api => github.com/openshift/api v0.0.0-20211014063134-be2a7fb8aa44
 	github.com/openshift/client-go => github.com/openshift/client-go v0.0.0-20200326155132-2a6cd50aedd0 // release-4.5
 
+	// TODO(fail-forward): Remove me when OperatorGroup change is released in o-f/api
+	github.comt/operator-framework/api => github.com/njhale/api-1 v0.0.0-20220208183748-5028003cc923
+
 	// Patch for a race condition involving metadata-only
 	// informers until it can be resolved upstream:
 	sigs.k8s.io/controller-runtime v0.10.0 => github.com/timflannagan/controller-runtime v0.10.1-0.20211210161403-6756a4203e70
