@@ -42,9 +42,16 @@ type OperatorGroupSpec struct {
 	// used to deploy operator(s) in this operator group.
 	ServiceAccountName string `json:"serviceAccountName,omitempty"`
 
-	// Static tells OLM not to update the OperatorGroup's providedAPIs annotation
+	// StaticProvidedAPIs tells OLM not to update the OperatorGroup's providedAPIs annotation
 	// +optional
 	StaticProvidedAPIs bool `json:"staticProvidedAPIs,omitempty"`
+
+	// FailForwardUpgrades enables "fail forward upgrades" for all operators in the group when true.
+	// "Failing forward" means that an upgrade will proceed on a best-effort basis, even when an
+	// operator's deployment has failed, so long as there's an upgrade available.
+	// It is disabled by default.
+	// +optional
+	FailForwardUpgrades bool `json:"failForwardUpgrades,omitempty"`
 }
 
 // OperatorGroupStatus is the status for an OperatorGroupResource.
