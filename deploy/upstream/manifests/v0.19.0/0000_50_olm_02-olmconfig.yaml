@@ -1,0 +1,6 @@
+---
+# Source: olm/templates/0000_50_olm_02-olmconfig.yaml
+apiVersion: operators.coreos.com/v1
+kind: OLMConfig
+metadata:
+  name: cluster
