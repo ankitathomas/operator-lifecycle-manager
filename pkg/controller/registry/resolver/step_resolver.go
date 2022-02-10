@@ -72,6 +72,14 @@ func (r *OperatorStepResolver) Expire(key cache.SourceKey) {
 }
 
 func (r *OperatorStepResolver) ResolveSteps(namespace string) ([]*v1alpha1.Step, []v1alpha1.BundleLookup, []*v1alpha1.Subscription, error) {
+	og, err := r.client.OperatorsV1().OperatorGroups(namespace).List(context.TODO(),metav1.ListOptions{})
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	if len(og.Items) != 1 {
+		return nil, nil, nil, fmt.Errorf("Too many operatorGroups in namespace %s", namespace)
+	}
+
 	// create a generation - a representation of the current set of installed operators and their provided/required apis
 	allCSVs, err := r.csvLister.ClusterServiceVersions(namespace).List(labels.Everything())
 	if err != nil {
@@ -81,8 +89,10 @@ func (r *OperatorStepResolver) ResolveSteps(namespace string) ([]*v1alpha1.Step,
 	// TODO: build this index ahead of time
 	// omit copied csvs from generation - they indicate that apis are provided to the namespace, not by the namespace
 	var csvs []*v1alpha1.ClusterServiceVersion
+	failForward := og.Items[0].Spec.FailForwardUpgrades
+
 	for i := range allCSVs {
-		if !allCSVs[i].IsCopied() {
+		if !allCSVs[i].IsCopied() && !(failForward && allCSVs[i].Status.Phase == v1alpha1.CSVPhaseReplacing) {
 			csvs = append(csvs, allCSVs[i])
 		}
 	}
