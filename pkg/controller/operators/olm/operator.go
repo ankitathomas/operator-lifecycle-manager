@@ -2107,7 +2107,15 @@ func (a *Operator) transitionCSVState(in v1alpha1.ClusterServiceVersion) (out *v
 		}
 
 		// If there is a succeeded replacement, mark this for deletion
-		if next := a.isBeingReplaced(out, a.csvSet(out.GetNamespace(), v1alpha1.CSVPhaseAny)); next != nil {
+		next := a.isBeingReplaced(out, a.csvSet(out.GetNamespace(), v1alpha1.CSVPhaseAny))
+		if operatorGroup.Spec.FailForwardUpgrades {
+			tmp := next
+			for tmp != nil {
+				next = tmp
+				tmp = a.isBeingReplaced(next, a.csvSet(next.GetNamespace(), v1alpha1.CSVPhaseAny))
+			}
+		}
+		if next != nil {
 			if next.Status.Phase == v1alpha1.CSVPhaseSucceeded {
 				out.SetPhaseWithEvent(v1alpha1.CSVPhaseDeleting, v1alpha1.CSVReasonReplaced, "has been replaced by a newer ClusterServiceVersion that has successfully installed.", now, a.recorder)
 			} else {
