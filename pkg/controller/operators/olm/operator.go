@@ -2299,6 +2299,7 @@ func (a *Operator) crdOwnerConflicts(in *v1alpha1.ClusterServiceVersion, csvsInN
 }
 
 func (a *Operator) getReplacementChain(in *v1alpha1.ClusterServiceVersion, csvsInNamespace map[string]*v1alpha1.ClusterServiceVersion) map[string]struct{} {
+	// TODO: if fail-forward is enabled, add add entire chain to replacement chain
 	current := in.GetName()
 	csvsInChain := map[string]struct{}{
 		current: {},

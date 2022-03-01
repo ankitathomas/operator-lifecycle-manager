@@ -65,10 +65,10 @@ func NewBundleInstallableFromOperator(o *cache.Entry) (BundleInstallable, error)
 		// CSVs already associated with a Subscription
 		// may be replaced, but freestanding CSVs must
 		// appear in any solution.
-		constraints = append(constraints, PrettyConstraint(
-			solver.Mandatory(),
-			fmt.Sprintf("clusterserviceversion %s exists and is not referenced by a subscription", o.Name),
-		))
+		//constraints = append(constraints, PrettyConstraint(
+		//	solver.Mandatory(),
+		//	fmt.Sprintf("clusterserviceversion %s exists and is not referenced by a subscription", o.Name),
+		//))
 	}
 	for _, p := range o.Properties {
 		if p.GetType() == operatorregistry.DeprecatedType {

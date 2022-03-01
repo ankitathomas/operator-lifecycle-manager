@@ -92,9 +92,18 @@ func (r *OperatorStepResolver) ResolveSteps(namespace string) ([]*v1alpha1.Step,
 	failForward := og.Items[0].Spec.FailForwardUpgrades
 
 	for i := range allCSVs {
-		if !allCSVs[i].IsCopied() && !(failForward && allCSVs[i].Status.Phase == v1alpha1.CSVPhaseReplacing) {
-			csvs = append(csvs, allCSVs[i])
+		if allCSVs[i].IsCopied() {
+			continue
 		}
+
+		// TODO: {fail-forward} method for first replacing csv isLastInstalledCSV
+		if failForward && !isEarliestCSVInUpgradePath(allCSVs[i], allCSVs) {
+			r.log.Debugf("FailForward enabled, not considering %s for upgrade", allCSVs[i].Name)
+			continue
+		}
+
+		r.log.Debugf("Adding %s for upgrade graph calculation", allCSVs[i].Name)
+		csvs = append(csvs, allCSVs[i])
 	}
 
 	subs, err := r.listSubscriptions(namespace)
@@ -219,6 +228,20 @@ func (r *OperatorStepResolver) ResolveSteps(namespace string) ([]*v1alpha1.Step,
 	// Order Steps
 	steps = v1alpha1.OrderSteps(steps)
 	return steps, bundleLookups, updatedSubs, nil
+}
+
+func isEarliestCSVInUpgradePath(csv *v1alpha1.ClusterServiceVersion, allCSVs []*v1alpha1.ClusterServiceVersion) bool {
+	if len(csv.Spec.Replaces) == 0 {
+		return true
+	}
+
+	for _, c := range allCSVs {
+		if c.Name == csv.Spec.Replaces {
+			return false
+		}
+	}
+
+	return true
 }
 
 func (r *OperatorStepResolver) hasExistingCurrentCSV(sub *v1alpha1.Subscription) (bool, error) {
