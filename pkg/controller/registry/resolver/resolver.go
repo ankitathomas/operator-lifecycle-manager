@@ -80,6 +80,7 @@ func (r *SatResolver) SolveOperators(namespaces []string, csvs []*v1alpha1.Clust
 	for _, sub := range subs {
 		// find the currently installed operator (if it exists)
 		var current *cache.Entry
+		var failedCSV bool
 		for _, csv := range csvs {
 			if csv.Name == sub.Status.InstalledCSV {
 				op, err := newOperatorFromV1Alpha1CSV(csv)
@@ -87,6 +88,10 @@ func (r *SatResolver) SolveOperators(namespaces []string, csvs []*v1alpha1.Clust
 					return nil, err
 				}
 				current = op
+				if csv.Status.Phase == v1alpha1.CSVPhaseFailed || csv.Status.Phase == v1alpha1.CSVPhasePending {
+					// TODO(fail-forward): Filter pending states for only Failed -> Pending loops
+					failedCSV = true
+				}
 				break
 			}
 		}
@@ -96,7 +101,7 @@ func (r *SatResolver) SolveOperators(namespaces []string, csvs []*v1alpha1.Clust
 		}
 
 		// find operators, in channel order, that can skip from the current version or list the current in "replaces"
-		subInstallables, err := r.getSubscriptionInstallables(sub, current, namespacedCache, visited)
+		subInstallables, err := r.getSubscriptionInstallables(sub, current, namespacedCache, visited, failedCSV)
 		if err != nil {
 			errs = append(errs, err)
 			continue
@@ -219,7 +224,8 @@ func (r *SatResolver) newBundleInstallableFromEntry(entry *cache.Entry) (*Bundle
 	return &bundleInstalleble, nil
 }
 
-func (r *SatResolver) getSubscriptionInstallables(sub *v1alpha1.Subscription, current *cache.Entry, namespacedCache cache.MultiCatalogOperatorFinder, visited map[*cache.Entry]*BundleInstallable) (map[solver.Identifier]solver.Installable, error) {
+func (r *SatResolver) getSubscriptionInstallables(sub *v1alpha1.Subscription, current *cache.Entry, namespacedCache cache.MultiCatalogOperatorFinder, visited map[*cache.Entry]*BundleInstallable, ensureFailForward bool) (map[solver.Identifier]solver.Installable, error) {
+	const failForwardBundleConstraint = "olm.failForwardAllowed"
 	var cachePredicates, channelPredicates []cache.Predicate
 	installables := make(map[solver.Identifier]solver.Installable)
 
@@ -235,7 +241,17 @@ func (r *SatResolver) getSubscriptionInstallables(sub *v1alpha1.Subscription, cu
 		csvPredicate := cache.True()
 		if current != nil {
 			// if we found an existing installed operator, we should filter the channel by operators that can replace it
-			channelPredicates = append(channelPredicates, cache.Or(cache.SkipRangeIncludesPredicate(*current.Version), cache.ReplacesPredicate(current.Name)))
+			upgradeCandidatePredicate := cache.Or(cache.SkipRangeIncludesPredicate(*current.Version), cache.ReplacesPredicate(current.Name))
+
+			if ensureFailForward {
+				// This is an upgrade from a failed operator install. Ensure the target bundle has the `fail-forward-allowed` property
+				failForwardConstraint, err := r.pc.predicateForConstraintProperty(fmt.Sprintf(`{"failureMessage":"%s","cel":{"rule":"properties.exists(p, p.type == 'olm.failForwardAllowed' && p.value == true)"}}`, failForwardBundleConstraint))
+				if err != nil {
+					return nil, err
+				}
+				upgradeCandidatePredicate = cache.And(upgradeCandidatePredicate, failForwardConstraint)
+			}
+			channelPredicates = append(channelPredicates, upgradeCandidatePredicate)
 		} else if sub.Spec.StartingCSV != "" {
 			// if no operator is installed and we have a startingCSV, filter for it
 			csvPredicate = cache.CSVNamePredicate(sub.Spec.StartingCSV)
