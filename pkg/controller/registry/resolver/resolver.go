@@ -88,8 +88,8 @@ func (r *SatResolver) SolveOperators(namespaces []string, csvs []*v1alpha1.Clust
 					return nil, err
 				}
 				current = op
-				if csv.Status.Phase == v1alpha1.CSVPhaseFailed || csv.Status.Phase == v1alpha1.CSVPhasePending {
-					// TODO(fail-forward): Filter pending states for only Failed -> Pending loops
+				// TODO(fail-forward): If CSV has been stuck in pending for 5 minutes, include it here.
+				if csv.Status.Phase == v1alpha1.CSVPhaseFailed {
 					failedCSV = true
 				}
 				break
@@ -225,7 +225,7 @@ func (r *SatResolver) newBundleInstallableFromEntry(entry *cache.Entry) (*Bundle
 }
 
 func (r *SatResolver) getSubscriptionInstallables(sub *v1alpha1.Subscription, current *cache.Entry, namespacedCache cache.MultiCatalogOperatorFinder, visited map[*cache.Entry]*BundleInstallable, ensureFailForward bool) (map[solver.Identifier]solver.Installable, error) {
-	const failForwardBundleConstraint = "olm.failForwardAllowed"
+	const failForwardBundleConstraint = "olm.failForward"
 	var cachePredicates, channelPredicates []cache.Predicate
 	installables := make(map[solver.Identifier]solver.Installable)
 
@@ -245,7 +245,7 @@ func (r *SatResolver) getSubscriptionInstallables(sub *v1alpha1.Subscription, cu
 
 			if ensureFailForward {
 				// This is an upgrade from a failed operator install. Ensure the target bundle has the `fail-forward-allowed` property
-				failForwardConstraint, err := r.pc.predicateForConstraintProperty(fmt.Sprintf(`{"failureMessage":"%s","cel":{"rule":"properties.exists(p, p.type == 'olm.failForwardAllowed' && p.value == true)"}}`, failForwardBundleConstraint))
+				failForwardConstraint, err := r.pc.predicateForConstraintProperty(fmt.Sprintf(`{"failureMessage":"%s","cel":{"rule":"properties.exists(p, p.type == 'olm.failForward' && p.value.supported == true)"}}`, failForwardBundleConstraint))
 				if err != nil {
 					return nil, err
 				}

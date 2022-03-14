@@ -72,7 +72,7 @@ func (r *OperatorStepResolver) Expire(key cache.SourceKey) {
 }
 
 func (r *OperatorStepResolver) ResolveSteps(namespace string) ([]*v1alpha1.Step, []v1alpha1.BundleLookup, []*v1alpha1.Subscription, error) {
-	og, err := r.client.OperatorsV1().OperatorGroups(namespace).List(context.TODO(),metav1.ListOptions{})
+	og, err := r.client.OperatorsV1().OperatorGroups(namespace).List(context.TODO(), metav1.ListOptions{})
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -89,10 +89,13 @@ func (r *OperatorStepResolver) ResolveSteps(namespace string) ([]*v1alpha1.Step,
 	// TODO: build this index ahead of time
 	// omit copied csvs from generation - they indicate that apis are provided to the namespace, not by the namespace
 	var csvs []*v1alpha1.ClusterServiceVersion
-	failForward := og.Items[0].Spec.FailForwardUpgrades
 
 	for i := range allCSVs {
-		if !allCSVs[i].IsCopied() && !(failForward && allCSVs[i].Status.Phase == v1alpha1.CSVPhaseReplacing) {
+		if !allCSVs[i].IsCopied() {
+			// TODO(fail-forward): Recover from failed installplans
+			if og.Items[0].Spec.FailForwardUpgrades && allCSVs[i].Status.Phase == v1alpha1.CSVPhaseReplacing {
+				continue
+			}
 			csvs = append(csvs, allCSVs[i])
 		}
 	}

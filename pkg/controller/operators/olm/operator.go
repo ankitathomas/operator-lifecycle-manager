@@ -1822,8 +1822,10 @@ func (a *Operator) transitionCSVState(in v1alpha1.ClusterServiceVersion) (out *v
 
 		if !met {
 			// Allow fail-forward to upgrade even if previous csv is pending
-			if replacement := a.isBeingReplaced(out, a.csvSet(out.GetNamespace(), v1alpha1.CSVPhaseAny)); replacement != nil && operatorGroup.Spec.FailForwardUpgrades == true  {
-				a.logger.Infof("newer csv replacing %s csv %s", out.Status.Phase, out.GetName())
+			// TODO(fail-forward): Add check if replacement csv has failed forward annotation.
+			stuckTimeoutDuration := time.Minute
+			if replacement := a.isBeingReplaced(out, a.csvSet(out.GetNamespace(), v1alpha1.CSVPhaseAny)); replacement != nil && operatorGroup.Spec.FailForwardUpgrades == true && out.Status.LastTransitionTime.After(out.Status.LastTransitionTime.Time.Add(stuckTimeoutDuration)) {
+				a.logger.Infof("csv %s has been stuck in PENDING phase for %v, allowing it to be replaced", out.GetName())
 				msg := fmt.Sprintf("%s csv being replaced by csv: %s", out.Status.Phase, replacement.GetName())
 				out.SetPhaseWithEvent(v1alpha1.CSVPhaseReplacing, v1alpha1.CSVReasonBeingReplaced, msg, a.now(), a.recorder)
 				metrics.CSVUpgradeCount.Inc()
@@ -2008,7 +2010,7 @@ func (a *Operator) transitionCSVState(in v1alpha1.ClusterServiceVersion) (out *v
 	case v1alpha1.CSVPhaseFailed:
 		// TODO(fail-forward):
 		// Transition to replacing if FailForward is enabled and a CSV exists that replaces the operator.
-		if replacement := a.isBeingReplaced(out, a.csvSet(out.GetNamespace(), v1alpha1.CSVPhaseAny)); replacement != nil && operatorGroup.Spec.FailForwardUpgrades == true  {
+		if replacement := a.isBeingReplaced(out, a.csvSet(out.GetNamespace(), v1alpha1.CSVPhaseAny)); replacement != nil && operatorGroup.Spec.FailForwardUpgrades == true {
 			a.logger.Infof("newer csv replacing %s csv %s", out.Status.Phase, out.GetName())
 			msg := fmt.Sprintf("%s csv being replaced by csv: %s", out.Status.Phase, replacement.GetName())
 			out.SetPhaseWithEvent(v1alpha1.CSVPhaseReplacing, v1alpha1.CSVReasonBeingReplaced, msg, a.now(), a.recorder)
@@ -2085,7 +2087,9 @@ func (a *Operator) transitionCSVState(in v1alpha1.ClusterServiceVersion) (out *v
 			out.SetPhaseWithEvent(v1alpha1.CSVPhasePending, v1alpha1.CSVReasonNeedsReinstall, "calculated deployment install is bad", now, a.recorder)
 			return
 		}
-		if installErr := a.updateInstallStatus(out, installer, strategy, v1alpha1.CSVPhasePending, v1alpha1.CSVReasonNeedsReinstall); installErr != nil {
+		// TODO(fail-forward): Place CSVs with invalid Deployments names in perma-failed state
+		// Hack below addresses this for now.
+		if installErr := a.updateInstallStatus(out, installer, strategy, v1alpha1.CSVPhaseFailed, v1alpha1.CSVReasonNeedsReinstall); installErr != nil {
 			// Re-sync if kube-apiserver was unavailable
 			if k8serrors.IsServiceUnavailable(installErr) {
 				logger.WithError(installErr).Info("could not update install status")
