@@ -12,6 +12,7 @@ import (
 	utilerrors "k8s.io/apimachinery/pkg/util/errors"
 
 	"github.com/operator-framework/api/pkg/constraints"
+	"github.com/operator-framework/api/pkg/lib/version"
 	"github.com/operator-framework/api/pkg/operators/v1alpha1"
 	v1alpha1listers "github.com/operator-framework/operator-lifecycle-manager/pkg/api/client/listers/operators/v1alpha1"
 	"github.com/operator-framework/operator-lifecycle-manager/pkg/controller/registry/resolver/cache"
@@ -80,7 +81,7 @@ func (r *SatResolver) SolveOperators(namespaces []string, csvs []*v1alpha1.Clust
 	for _, sub := range subs {
 		// find the currently installed operator (if it exists)
 		var current *cache.Entry
-		var failedCSV bool
+		failedCSVVersionsForPkg := map[string][]version.OperatorVersion{}
 		for _, csv := range csvs {
 			if csv.Name == sub.Status.InstalledCSV {
 				op, err := newOperatorFromV1Alpha1CSV(csv)
@@ -90,7 +91,10 @@ func (r *SatResolver) SolveOperators(namespaces []string, csvs []*v1alpha1.Clust
 				current = op
 				// TODO(fail-forward): If CSV has been stuck in pending for 5 minutes, include it here.
 				if csv.Status.Phase == v1alpha1.CSVPhaseFailed {
-					failedCSV = true
+					if _, ok := failedCSVVersionsForPkg[op.Package()]; !ok {
+						failedCSVVersionsForPkg[op.Package()] = []version.OperatorVersion{}
+					}
+					failedCSVVersionsForPkg[op.Package()] = append(failedCSVVersionsForPkg[op.Package()], csv.Spec.Version)
 				}
 				break
 			}
@@ -101,7 +105,7 @@ func (r *SatResolver) SolveOperators(namespaces []string, csvs []*v1alpha1.Clust
 		}
 
 		// find operators, in channel order, that can skip from the current version or list the current in "replaces"
-		subInstallables, err := r.getSubscriptionInstallables(sub, current, namespacedCache, visited, failedCSV)
+		subInstallables, err := r.getSubscriptionInstallables(sub, current, namespacedCache, visited, failedCSVVersionsForPkg)
 		if err != nil {
 			errs = append(errs, err)
 			continue
@@ -224,8 +228,7 @@ func (r *SatResolver) newBundleInstallableFromEntry(entry *cache.Entry) (*Bundle
 	return &bundleInstalleble, nil
 }
 
-func (r *SatResolver) getSubscriptionInstallables(sub *v1alpha1.Subscription, current *cache.Entry, namespacedCache cache.MultiCatalogOperatorFinder, visited map[*cache.Entry]*BundleInstallable, ensureFailForward bool) (map[solver.Identifier]solver.Installable, error) {
-	const failForwardBundleConstraint = "olm.failForward"
+func (r *SatResolver) getSubscriptionInstallables(sub *v1alpha1.Subscription, current *cache.Entry, namespacedCache cache.MultiCatalogOperatorFinder, visited map[*cache.Entry]*BundleInstallable, failedCSVsForPackage map[string][]version.OperatorVersion) (map[solver.Identifier]solver.Installable, error) {
 	var cachePredicates, channelPredicates []cache.Predicate
 	installables := make(map[solver.Identifier]solver.Installable)
 
@@ -243,13 +246,9 @@ func (r *SatResolver) getSubscriptionInstallables(sub *v1alpha1.Subscription, cu
 			// if we found an existing installed operator, we should filter the channel by operators that can replace it
 			upgradeCandidatePredicate := cache.Or(cache.SkipRangeIncludesPredicate(*current.Version), cache.ReplacesPredicate(current.Name))
 
-			if ensureFailForward {
-				// This is an upgrade from a failed operator install. Ensure the target bundle has the `fail-forward-allowed` property
-				failForwardConstraint, err := r.pc.predicateForConstraintProperty(fmt.Sprintf(`{"failureMessage":"%s","cel":{"rule":"properties.exists(p, p.type == 'olm.failForward' && p.value.supported == true)"}}`, failForwardBundleConstraint))
-				if err != nil {
-					return nil, err
-				}
-				upgradeCandidatePredicate = cache.And(upgradeCandidatePredicate, failForwardConstraint)
+			if len(failedCSVsForPackage) > 0 {
+				// This is an upgrade from a failed operator install. Ensure the target bundle has a valid `olm.failForward` property
+				upgradeCandidatePredicate = cache.And(upgradeCandidatePredicate, cache.FailForwardPredicate(failedCSVsForPackage))
 			}
 			channelPredicates = append(channelPredicates, upgradeCandidatePredicate)
 		} else if sub.Spec.StartingCSV != "" {

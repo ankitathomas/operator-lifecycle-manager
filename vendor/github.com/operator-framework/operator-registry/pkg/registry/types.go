@@ -7,7 +7,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/blang/semver"
+	"github.com/blang/semver/v4"
+	"github.com/operator-framework/api/pkg/constraints"
 )
 
 var (
@@ -50,11 +51,13 @@ func (e OverwriteErr) Error() string {
 }
 
 const (
-	GVKType        = "olm.gvk"
-	PackageType    = "olm.package"
-	DeprecatedType = "olm.deprecated"
-	LabelType      = "olm.label"
-	PropertyKey    = "olm.properties"
+	GVKType         = "olm.gvk"
+	PackageType     = "olm.package"
+	DeprecatedType  = "olm.deprecated"
+	LabelType       = "olm.label"
+	PropertyKey     = "olm.properties"
+	ConstraintType  = "olm.constraint"
+	FailForwardType = "olm.failForward"
 )
 
 // APIKey stores GroupVersionKind for use as map keys
@@ -220,6 +223,16 @@ type LabelDependency struct {
 	Label string `json:"label" yaml:"label"`
 }
 
+type CelConstraint struct {
+	// Constraint failure message that surfaces in resolution
+	// This field is optional
+	FailureMessage string `json:"failureMessage" yaml:"failureMessage"`
+
+	// The cel struct that contraints CEL expression
+	// This field is required
+	Cel *constraints.Cel `json:"cel" yaml:"cel"`
+}
+
 type GVKProperty struct {
 	// The group of GVK based property
 	Group string `json:"group" yaml:"group"`
@@ -246,6 +259,11 @@ type DeprecatedProperty struct {
 type LabelProperty struct {
 	// The name of Label
 	Label string `json:"label" yaml:"label"`
+}
+
+type FailForwardProperty struct {
+	// The range of versions from which to allow a failForward upgrade
+	SemverRange string `json:"semverRange" yaml:"semverRange"`
 }
 
 // Validate will validate GVK dependency type and return error(s)
@@ -289,6 +307,37 @@ func (pd *PackageDependency) Validate() []error {
 	return errs
 }
 
+// Validate will validate constraint type and return error(s)
+func (cc *CelConstraint) Validate() []error {
+	errs := []error{}
+	if cc.Cel == nil {
+		errs = append(errs, fmt.Errorf("The CEL field is missing"))
+	} else {
+		if cc.Cel.Rule == "" {
+			errs = append(errs, fmt.Errorf("The CEL expression is missing"))
+			return errs
+		}
+		validator := constraints.NewCelEnvironment()
+		_, err := validator.Validate(cc.Cel.Rule)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("Invalid CEL expression: %s", err.Error()))
+		}
+	}
+	return errs
+}
+
+// Validate checks for a valid SemverRange when present.
+// No validation is done to check whether the range overlaps with the parent bundle's skips/replaces/skipRange
+func (ff *FailForwardProperty) Validate() []error {
+	errs := []error{}
+	if len(ff.SemverRange) > 0 {
+		if _, err := semver.ParseRange(ff.SemverRange); err != nil {
+			errs = append(errs, fmt.Errorf("Failed to parse SemverRange: %s", err.Error()))
+		}
+	}
+	return errs
+}
+
 // GetDependencies returns the list of dependency
 func (d *DependenciesFile) GetDependencies() []*Dependency {
 	var dependencies []*Dependency
@@ -324,6 +373,20 @@ func (e *Dependency) GetTypeValue() interface{} {
 		return dep
 	case LabelType:
 		dep := LabelDependency{}
+		err := json.Unmarshal([]byte(e.GetValue()), &dep)
+		if err != nil {
+			return nil
+		}
+		return dep
+	case ConstraintType:
+		dep := CelConstraint{}
+		err := json.Unmarshal([]byte(e.GetValue()), &dep)
+		if err != nil {
+			return nil
+		}
+		return dep
+	case FailForwardType:
+		dep := FailForwardProperty{}
 		err := json.Unmarshal([]byte(e.GetValue()), &dep)
 		if err != nil {
 			return nil

@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"github.com/operator-framework/api/pkg/lib/version"
+	"github.com/operator-framework/operator-registry/pkg/api"
 
 	"github.com/blang/semver/v4"
 
@@ -393,4 +395,67 @@ func CreateCelPredicate(env *constraints.CelEnvironment, rule string, failureMes
 
 func (cp *celPredicate) String() string {
 	return fmt.Sprintf("with constraint: %q and message: %q", cp.rule, cp.failureMessage)
+}
+
+type failForwardPredicate struct {
+	failForwardFrom map[string][]version.OperatorVersion
+}
+
+type FailForwardProperty struct {
+	// The range of versions from which to allow a failForward upgrade
+	SemverRange string `json:"semverRange" yaml:"semverRange"`
+}
+
+func (f *failForwardPredicate) Test(entry *Entry) bool {
+	if len(f.failForwardFrom) == 0 {
+		// no failed csvs, nothing to test for
+		// TODO: include versions with failed installPlans but no CSVs generated
+		return true
+	}
+
+	var failForwardProp *api.Property
+	for _, p := range entry.Properties {
+		if p.Type == opregistry.FailForwardType {
+			// Only one failForward property must be present per bundle
+			failForwardProp = p
+		}
+	}
+
+	if failForwardProp == nil {
+		return false
+	}
+	if len(failForwardProp.Value) == 0 {
+		// Empty semverRange allows failForward from any bundle to current one.
+		return true
+	}
+	var propRange opregistry.FailForwardProperty
+	if err := json.Unmarshal([]byte(failForwardProp.Value), &propRange); err != nil {
+		// TODO: bubble up errors for invalid failForward ranges
+		return false
+	}
+	if len(propRange.SemverRange) == 0 {
+		// Empty semverRange allows failForward from any bundle to current one.
+		return true
+	}
+
+	failForwardRange, err := semver.ParseRange(propRange.SemverRange)
+	if err != nil {
+		// TODO: bubble up errors for invalid failForward ranges
+		return false
+	}
+
+	for _, v := range f.failForwardFrom[entry.Package()] {
+		if !failForwardRange(v.Version) {
+			return false
+		}
+	}
+	return true
+}
+
+func (f *failForwardPredicate) String() string {
+	return fmt.Sprintf("property %s includes %v", opregistry.FailForwardType, f.failForwardFrom)
+}
+
+func FailForwardPredicate(failForwardFrom map[string][]version.OperatorVersion) Predicate {
+	return &failForwardPredicate{failForwardFrom: failForwardFrom}
 }
