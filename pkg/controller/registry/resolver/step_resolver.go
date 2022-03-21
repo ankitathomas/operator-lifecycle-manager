@@ -90,20 +90,16 @@ func (r *OperatorStepResolver) ResolveSteps(namespace string) ([]*v1alpha1.Step,
 	// TODO: build this index ahead of time
 	// omit copied csvs from generation - they indicate that apis are provided to the namespace, not by the namespace
 	var csvs []*v1alpha1.ClusterServiceVersion
-	var failForwardEnabled bool
+	var failForwardStrategy *string
 	if len(allCSVs) > 0 {
 		if len(og.Items[0].Annotations) > 0 {
-			if _, ok := og.Items[0].Annotations[v1.OperatorGroupFailForwardAnnotationKey]; ok {
-				failForwardEnabled = true
+			if ffStrategy, ok := og.Items[0].Annotations[v1.OperatorGroupFailForwardAnnotationKey]; ok {
+				failForwardStrategy = &ffStrategy
 			}
 		}
 	}
 	for i := range allCSVs {
 		if !allCSVs[i].IsCopied() {
-			// TODO(fail-forward): Recover from failed installplans
-			if failForwardEnabled && allCSVs[i].Status.Phase == v1alpha1.CSVPhaseReplacing {
-				continue
-			}
 			csvs = append(csvs, allCSVs[i])
 		}
 	}
@@ -115,7 +111,7 @@ func (r *OperatorStepResolver) ResolveSteps(namespace string) ([]*v1alpha1.Step,
 
 	var operators cache.OperatorSet
 	namespaces := []string{namespace, r.globalCatalogNamespace}
-	operators, err = r.satResolver.SolveOperators(namespaces, csvs, subs)
+	operators, err = r.satResolver.SolveOperators(namespaces, csvs, subs, failForwardStrategy)
 	if err != nil {
 		return nil, nil, nil, err
 	}

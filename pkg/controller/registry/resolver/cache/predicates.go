@@ -398,7 +398,7 @@ func (cp *celPredicate) String() string {
 }
 
 type failForwardPredicate struct {
-	failForwardFrom map[string][]version.OperatorVersion
+	failForwardFrom []version.OperatorVersion
 }
 
 type FailForwardProperty struct {
@@ -444,7 +444,7 @@ func (f *failForwardPredicate) Test(entry *Entry) bool {
 		return false
 	}
 
-	for _, v := range f.failForwardFrom[entry.Package()] {
+	for _, v := range f.failForwardFrom {
 		if !failForwardRange(v.Version) {
 			return false
 		}
@@ -456,6 +456,6 @@ func (f *failForwardPredicate) String() string {
 	return fmt.Sprintf("property %s includes %v", opregistry.FailForwardType, f.failForwardFrom)
 }
 
-func FailForwardPredicate(failForwardFrom map[string][]version.OperatorVersion) Predicate {
+func FailForwardPredicate(failForwardFrom []version.OperatorVersion) Predicate {
 	return &failForwardPredicate{failForwardFrom: failForwardFrom}
 }

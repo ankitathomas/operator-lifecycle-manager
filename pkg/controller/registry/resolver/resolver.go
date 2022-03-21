@@ -53,7 +53,14 @@ func (w *debugWriter) Write(b []byte) (int, error) {
 	return n, nil
 }
 
-func (r *SatResolver) SolveOperators(namespaces []string, csvs []*v1alpha1.ClusterServiceVersion, subs []*v1alpha1.Subscription) (cache.OperatorSet, error) {
+// TODO(fail-forward): Move this somewhere more appropriate, remove unneeded strategies
+const (
+	failForwardStrategySimple     = "simple"
+	failForwardStrategyTransitive = "transitive"
+	failForwardStrategyUnsafe     = "unsafe"
+)
+
+func (r *SatResolver) SolveOperators(namespaces []string, csvs []*v1alpha1.ClusterServiceVersion, subs []*v1alpha1.Subscription, failForwardStrategy *string) (cache.OperatorSet, error) {
 	var errs []error
 
 	installables := make(map[solver.Identifier]solver.Installable)
@@ -61,6 +68,60 @@ func (r *SatResolver) SolveOperators(namespaces []string, csvs []*v1alpha1.Clust
 
 	// TODO: better abstraction
 	startingCSVs := make(map[string]struct{})
+
+	// Handle multiple failed csvs for failForward
+	// TODO(fail-forward): Recover from failed installplans
+	failedCSVVersionsForPkg := map[string][]version.OperatorVersion{}
+
+	if failForwardStrategy != nil {
+		// The set of csvs to resolve against
+		var workingSetCSVs []*v1alpha1.ClusterServiceVersion
+
+		// Collect failed operator versions to test against for transitiveFailForward.
+		failedCSVsForPkg := map[string][]*v1alpha1.ClusterServiceVersion{}
+
+		// Collect the set of failedCSVs for each package
+		for _, csv := range csvs {
+			if *failForwardStrategy == failForwardStrategyTransitive {
+				// TODO(fail-forward): If CSV has been stuck in pending for 5 minutes, include it here.
+				if csv.Status.Phase == v1alpha1.CSVPhaseReplacing || csv.Status.Phase == v1alpha1.CSVPhaseFailed {
+					op, err := newOperatorFromV1Alpha1CSV(csv)
+					if err != nil {
+						return nil, err
+					}
+					if _, ok := failedCSVsForPkg[op.Package()]; !ok {
+						failedCSVsForPkg[op.Package()] = []*v1alpha1.ClusterServiceVersion{}
+					}
+					failedCSVsForPkg[op.Package()] = append(failedCSVsForPkg[op.Package()], csv)
+				}
+			}
+
+			// Don't include replacing csvs for resolution since this causes conflicts with multiple csvs present for a package when
+			// an installPlan fails after creating a CSV.
+			if csv.Status.Phase == v1alpha1.CSVPhaseReplacing {
+				continue
+			}
+			workingSetCSVs = append(workingSetCSVs, csv)
+		}
+
+		for pkg, failedCSVs := range failedCSVsForPkg {
+			if len(failedCSVs) == 1 {
+				// If only one CSV exists on cluster and it isn't in a failed state, there haven't been any failed upgrades to failForward from.
+				// TODO(fail-forward): If CSV has been stuck in pending for 5 minutes, include it here.
+				if failedCSVs[0].Status.Phase != v1alpha1.CSVPhaseFailed {
+					continue
+				}
+			}
+			if _, ok := failedCSVVersionsForPkg[pkg]; !ok {
+				failedCSVVersionsForPkg[pkg] = []version.OperatorVersion{}
+			}
+			for _, csv := range failedCSVs {
+				failedCSVVersionsForPkg[pkg] = append(failedCSVVersionsForPkg[pkg], csv.Spec.Version)
+			}
+		}
+
+		csvs = workingSetCSVs
+	}
 
 	// build a virtual catalog of all currently installed CSVs
 	existingSnapshot, err := r.newSnapshotForNamespace(namespaces[0], subs, csvs)
@@ -81,7 +142,6 @@ func (r *SatResolver) SolveOperators(namespaces []string, csvs []*v1alpha1.Clust
 	for _, sub := range subs {
 		// find the currently installed operator (if it exists)
 		var current *cache.Entry
-		failedCSVVersionsForPkg := map[string][]version.OperatorVersion{}
 		for _, csv := range csvs {
 			if csv.Name == sub.Status.InstalledCSV {
 				op, err := newOperatorFromV1Alpha1CSV(csv)
@@ -89,13 +149,6 @@ func (r *SatResolver) SolveOperators(namespaces []string, csvs []*v1alpha1.Clust
 					return nil, err
 				}
 				current = op
-				// TODO(fail-forward): If CSV has been stuck in pending for 5 minutes, include it here.
-				if csv.Status.Phase == v1alpha1.CSVPhaseFailed {
-					if _, ok := failedCSVVersionsForPkg[op.Package()]; !ok {
-						failedCSVVersionsForPkg[op.Package()] = []version.OperatorVersion{}
-					}
-					failedCSVVersionsForPkg[op.Package()] = append(failedCSVVersionsForPkg[op.Package()], csv.Spec.Version)
-				}
 				break
 			}
 		}
@@ -105,7 +158,7 @@ func (r *SatResolver) SolveOperators(namespaces []string, csvs []*v1alpha1.Clust
 		}
 
 		// find operators, in channel order, that can skip from the current version or list the current in "replaces"
-		subInstallables, err := r.getSubscriptionInstallables(sub, current, namespacedCache, visited, failedCSVVersionsForPkg)
+		subInstallables, err := r.getSubscriptionInstallables(sub, current, namespacedCache, visited, failForwardStrategy, failedCSVVersionsForPkg[current.Package()])
 		if err != nil {
 			errs = append(errs, err)
 			continue
@@ -228,7 +281,7 @@ func (r *SatResolver) newBundleInstallableFromEntry(entry *cache.Entry) (*Bundle
 	return &bundleInstalleble, nil
 }
 
-func (r *SatResolver) getSubscriptionInstallables(sub *v1alpha1.Subscription, current *cache.Entry, namespacedCache cache.MultiCatalogOperatorFinder, visited map[*cache.Entry]*BundleInstallable, failedCSVsForPackage map[string][]version.OperatorVersion) (map[solver.Identifier]solver.Installable, error) {
+func (r *SatResolver) getSubscriptionInstallables(sub *v1alpha1.Subscription, current *cache.Entry, namespacedCache cache.MultiCatalogOperatorFinder, visited map[*cache.Entry]*BundleInstallable, failForwardStrategy *string, failedCSVsForPackage []version.OperatorVersion) (map[solver.Identifier]solver.Installable, error) {
 	var cachePredicates, channelPredicates []cache.Predicate
 	installables := make(map[solver.Identifier]solver.Installable)
 
@@ -246,9 +299,22 @@ func (r *SatResolver) getSubscriptionInstallables(sub *v1alpha1.Subscription, cu
 			// if we found an existing installed operator, we should filter the channel by operators that can replace it
 			upgradeCandidatePredicate := cache.Or(cache.SkipRangeIncludesPredicate(*current.Version), cache.ReplacesPredicate(current.Name))
 
-			if len(failedCSVsForPackage) > 0 {
-				// This is an upgrade from a failed operator install. Ensure the target bundle has a valid `olm.failForward` property
-				upgradeCandidatePredicate = cache.And(upgradeCandidatePredicate, cache.FailForwardPredicate(failedCSVsForPackage))
+			if len(failedCSVsForPackage) > 0 && failForwardStrategy != nil {
+				// This is an upgrade from a failed operator install.
+				switch *failForwardStrategy {
+				case failForwardStrategySimple:
+					// Ensure the target bundle has a valid `olm.failForward` property
+					failForwardConstraint, err := r.pc.predicateForConstraintProperty(fmt.Sprintf(`{"failureMessage":"%s","cel":{"rule":"properties.exists(p, p.type == '%s' && p.value.supported == true)"}}`, opregistry.FailForwardType, opregistry.FailForwardType))
+					if err != nil {
+						return nil, err
+					}
+					upgradeCandidatePredicate = cache.And(upgradeCandidatePredicate, failForwardConstraint)
+				case failForwardStrategyTransitive:
+					// Ensure all previous consecutively failed csv versions have valid edges to chosen candidate
+					upgradeCandidatePredicate = cache.And(upgradeCandidatePredicate, cache.FailForwardPredicate(failedCSVsForPackage))
+				case failForwardStrategyUnsafe:
+					// noop, allow all failForward upgrades
+				}
 			}
 			channelPredicates = append(channelPredicates, upgradeCandidatePredicate)
 		} else if sub.Spec.StartingCSV != "" {
