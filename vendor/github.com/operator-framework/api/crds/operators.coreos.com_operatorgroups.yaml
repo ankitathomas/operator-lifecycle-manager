@@ -2,7 +2,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.6.2
+    controller-gen.kubebuilder.io/version: v0.8.0
   creationTimestamp: null
   name: operatorgroups.operators.coreos.com
 spec:
@@ -38,9 +38,6 @@ spec:
               description: OperatorGroupSpec is the spec for an OperatorGroup resource.
               type: object
               properties:
-                failForwardUpgrades:
-                  description: FailForwardUpgrades enables "fail forward upgrades" for all operators in the group when true. "Failing forward" means that an upgrade will proceed on a best-effort basis, even when an operator's deployment has failed, so long as there's an upgrade available. It is disabled by default.
-                  type: boolean
                 selector:
                   description: Selector selects the OperatorGroup's target namespaces.
                   type: object
@@ -75,7 +72,7 @@ spec:
                   description: ServiceAccountName is the admin specified service account which will be used to deploy operator(s) in this operator group.
                   type: string
                 staticProvidedAPIs:
-                  description: StaticProvidedAPIs tells OLM not to update the OperatorGroup's providedAPIs annotation
+                  description: Static tells OLM not to update the OperatorGroup's providedAPIs annotation
                   type: boolean
                 targetNamespaces:
                   description: TargetNamespaces is an explicit set of namespaces to target. If it is set, Selector is ignored.
@@ -93,7 +90,7 @@ spec:
                   description: Conditions is an array of the OperatorGroup's conditions.
                   type: array
                   items:
-                    description: "Condition contains details for one aspect of the current state of this API Resource. --- This struct is intended for direct use as an array at the field path .status.conditions.  For example, type FooStatus struct{     // Represents the observations of a foo's current state.     // Known .status.conditions.type are: \"Available\", \"Progressing\", and \"Degraded\"     // +patchMergeKey=type     // +patchStrategy=merge     // +listType=map     // +listMapKey=type     Conditions []metav1.Condition `json:\"conditions,omitempty\" patchStrategy:\"merge\" patchMergeKey:\"type\" protobuf:\"bytes,1,rep,name=conditions\"` \n     // other fields }"
+                    description: "Condition contains details for one aspect of the current state of this API Resource. --- This struct is intended for direct use as an array at the field path .status.conditions.  For example, type FooStatus struct{ // Represents the observations of a foo's current state. // Known .status.conditions.type are: \"Available\", \"Progressing\", and \"Degraded\" // +patchMergeKey=type // +patchStrategy=merge // +listType=map // +listMapKey=type Conditions []metav1.Condition `json:\"conditions,omitempty\" patchStrategy:\"merge\" patchMergeKey:\"type\" protobuf:\"bytes,1,rep,name=conditions\"` \n // other fields }"
                     type: object
                     required:
                       - lastTransitionTime

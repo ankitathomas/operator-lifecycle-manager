@@ -12,6 +12,7 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/client-go/kubernetes"
 
+	"github.com/operator-framework/api/pkg/operators/v1"
 	"github.com/operator-framework/api/pkg/operators/v1alpha1"
 	"github.com/operator-framework/operator-lifecycle-manager/pkg/api/client/clientset/versioned"
 	v1alpha1listers "github.com/operator-framework/operator-lifecycle-manager/pkg/api/client/listers/operators/v1alpha1"
@@ -89,11 +90,18 @@ func (r *OperatorStepResolver) ResolveSteps(namespace string) ([]*v1alpha1.Step,
 	// TODO: build this index ahead of time
 	// omit copied csvs from generation - they indicate that apis are provided to the namespace, not by the namespace
 	var csvs []*v1alpha1.ClusterServiceVersion
-
+	var failForwardEnabled bool
+	if len(allCSVs) > 0 {
+		if len(og.Items[0].Annotations) > 0 {
+			if _, ok := og.Items[0].Annotations[v1.OperatorGroupFailForwardAnnotationKey]; ok {
+				failForwardEnabled = true
+			}
+		}
+	}
 	for i := range allCSVs {
 		if !allCSVs[i].IsCopied() {
 			// TODO(fail-forward): Recover from failed installplans
-			if og.Items[0].Spec.FailForwardUpgrades && allCSVs[i].Status.Phase == v1alpha1.CSVPhaseReplacing {
+			if failForwardEnabled && allCSVs[i].Status.Phase == v1alpha1.CSVPhaseReplacing {
 				continue
 			}
 			csvs = append(csvs, allCSVs[i])

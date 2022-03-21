@@ -1787,6 +1787,13 @@ func (a *Operator) transitionCSVState(in v1alpha1.ClusterServiceVersion) (out *v
 		logger.WithField("apis", providedAPIs).Debug("no intersecting operatorgroups provide the same apis")
 	}
 
+	var failForwardEnabled bool
+	if len(operatorGroup.Annotations) > 0 {
+		if _, ok := operatorGroup.Annotations[v1.OperatorGroupFailForwardAnnotationKey]; ok {
+			failForwardEnabled = true
+		}
+	}
+
 	switch out.Status.Phase {
 	case v1alpha1.CSVPhaseNone:
 		logger.Info("scheduling ClusterServiceVersion for requirement verification")
@@ -1824,7 +1831,7 @@ func (a *Operator) transitionCSVState(in v1alpha1.ClusterServiceVersion) (out *v
 			// Allow fail-forward to upgrade even if previous csv is pending
 			// TODO(fail-forward): Add check if replacement csv has failed forward annotation.
 			stuckTimeoutDuration := time.Minute
-			if replacement := a.isBeingReplaced(out, a.csvSet(out.GetNamespace(), v1alpha1.CSVPhaseAny)); replacement != nil && operatorGroup.Spec.FailForwardUpgrades == true && out.Status.LastTransitionTime.After(out.Status.LastTransitionTime.Time.Add(stuckTimeoutDuration)) {
+			if replacement := a.isBeingReplaced(out, a.csvSet(out.GetNamespace(), v1alpha1.CSVPhaseAny)); replacement != nil && failForwardEnabled && out.Status.LastTransitionTime.After(out.Status.LastTransitionTime.Time.Add(stuckTimeoutDuration)) {
 				a.logger.Infof("csv %s has been stuck in PENDING phase for %v, allowing it to be replaced", out.GetName())
 				msg := fmt.Sprintf("%s csv being replaced by csv: %s", out.Status.Phase, replacement.GetName())
 				out.SetPhaseWithEvent(v1alpha1.CSVPhaseReplacing, v1alpha1.CSVReasonBeingReplaced, msg, a.now(), a.recorder)
@@ -2010,7 +2017,7 @@ func (a *Operator) transitionCSVState(in v1alpha1.ClusterServiceVersion) (out *v
 	case v1alpha1.CSVPhaseFailed:
 		// TODO(fail-forward):
 		// Transition to replacing if FailForward is enabled and a CSV exists that replaces the operator.
-		if replacement := a.isBeingReplaced(out, a.csvSet(out.GetNamespace(), v1alpha1.CSVPhaseAny)); replacement != nil && operatorGroup.Spec.FailForwardUpgrades == true {
+		if replacement := a.isBeingReplaced(out, a.csvSet(out.GetNamespace(), v1alpha1.CSVPhaseAny)); replacement != nil && failForwardEnabled {
 			a.logger.Infof("newer csv replacing %s csv %s", out.Status.Phase, out.GetName())
 			msg := fmt.Sprintf("%s csv being replaced by csv: %s", out.Status.Phase, replacement.GetName())
 			out.SetPhaseWithEvent(v1alpha1.CSVPhaseReplacing, v1alpha1.CSVReasonBeingReplaced, msg, a.now(), a.recorder)
@@ -2112,7 +2119,7 @@ func (a *Operator) transitionCSVState(in v1alpha1.ClusterServiceVersion) (out *v
 
 		// If there is a succeeded replacement, mark this for deletion
 		next := a.isBeingReplaced(out, a.csvSet(out.GetNamespace(), v1alpha1.CSVPhaseAny))
-		if operatorGroup.Spec.FailForwardUpgrades {
+		if failForwardEnabled {
 			tmp := next
 			for tmp != nil {
 				next = tmp
