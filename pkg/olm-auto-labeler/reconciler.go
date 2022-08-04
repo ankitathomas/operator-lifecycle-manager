@@ -2,6 +2,16 @@ package olm_auto_labeler
 
 import (
 	"context"
+	"fmt"
+	"github.com/operator-framework/api/pkg/operators/v1alpha1"
+	v1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/types"
+	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
+	"sigs.k8s.io/controller-runtime/pkg/source"
+	"strings"
 
 	"github.com/go-logr/logr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -32,6 +42,33 @@ func NewOLMAutoLabelerReconciler(client client.Client, options ...OLMAutoLabelle
 	return &reconciler
 }
 
+func (a *OLMAutoLabelerReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	err := builder.
+		ControllerManagedBy(mgr).
+		For(&v1.Namespace{}, ).
+		Watches(&source.Kind{Type: &v1alpha1.ClusterServiceVersion{}}, handler.EnqueueRequestsFromMapFunc(func(o client.Object)[] reconcile.Request{
+			csv, ok := o.(*v1alpha1.ClusterServiceVersion)
+			if !ok {
+				return nil
+			}
+			a.logger.Info("CSV operation: "+csv.GetNamespace())
+			return []reconcile.Request{}
+		})).WithEventFilter(predicate.NewPredicateFuncs(func (o client.Object) bool {
+		if o.GetObjectKind().GroupVersionKind().Kind == "namespace" {
+			return false
+		}
+		if !strings.HasPrefix(o.GetNamespace(), "openshift") {
+			return false
+		}
+		a.Get(context.TODO(), types.NamespacedName{Name: o.GetNamespace(), })
+		a.List(context.TODO(), nil, )
+		return strings.HasPrefix(o.GetNamespace(), "openshift")
+	})).Complete(a)
+
+	return err
+
+}
+
 func (a *OLMAutoLabelerReconciler) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
 
 	//rs := &appsv1.ReplicaSet{}
@@ -51,7 +88,7 @@ func (a *OLMAutoLabelerReconciler) Reconcile(ctx context.Context, req reconcile.
 	//if err != nil {
 	//	return reconcile.Result{}, err
 	//}
-	a.logger.Info("Got a request: %s", req.NamespacedName)
+	a.logger.Info(fmt.Sprintf("Got a request: %s", req.NamespacedName))
 
 	return reconcile.Result{}, nil
 }
