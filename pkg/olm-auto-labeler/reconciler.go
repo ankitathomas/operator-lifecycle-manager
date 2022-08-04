@@ -2,6 +2,7 @@ package olm_auto_labeler
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/go-logr/logr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -51,7 +52,7 @@ func (a *OLMAutoLabelerReconciler) Reconcile(ctx context.Context, req reconcile.
 	//if err != nil {
 	//	return reconcile.Result{}, err
 	//}
-	a.logger.Info("Got a request: %s", req.NamespacedName)
+	a.logger.Info(fmt.Sprintf("Got a request: %s", req.NamespacedName))
 
 	return reconcile.Result{}, nil
 }
