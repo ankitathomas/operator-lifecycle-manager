@@ -74,6 +74,7 @@ func (s *grpcCatalogSourceDecorator) Service() *corev1.Service {
 			Namespace: s.GetNamespace(),
 		},
 		Spec: corev1.ServiceSpec{
+			Type: corev1.ServiceTypeNodePort,
 			Ports: []corev1.ServicePort{
 				{
 					Name:       "grpc",
